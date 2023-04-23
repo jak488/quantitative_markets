@@ -14,8 +14,12 @@ from random import gauss
 from random import seed
 from matplotlib import pyplot
 from arch import arch_model
+from enum import Enum
 
 TRADING_DAYS_PER_YEAR = 250
+class OptType(Enum):
+    CALL = "call"
+    PUT = "put"
 
 def calc_iv(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, isCall):
 	if isCall:
@@ -129,7 +133,7 @@ def get_underlying(historicData):
 	return underlyingPrice
 
 def is_valid_option_type(optType):
-	if optType != "call" and optType != "put":
+	if optType != OptType.CALL.value and optType != OptType.PUT.value:
 		raise Exception("optType must be call or put")
 
 def calc_exp_moves(currentPrice, vol, daysToExpiration):
@@ -144,13 +148,13 @@ def calc_exp_moves(currentPrice, vol, daysToExpiration):
 def calc_opt_probabilities(underlyingPrice, strikePrice, optionPrice, daysToExpiration, iv, optType):
 	sigma = underlyingPrice*iv*(daysToExpiration/256)**0.5/100
 	data = {}
-	if optType == 'call':
+	if optType == OptType.CALL.value:
 		data['otm'] = scipy.stats.norm(underlyingPrice,sigma).cdf(strikePrice)
 		data['sellProfit'] = scipy.stats.norm(underlyingPrice,sigma).cdf(strikePrice + optionPrice)
 		if data['sellProfit'] == 0 and strikePrice < underlyingPrice:
 			data['sellProfit'] = 0.50
 		data['buyProfit'] = 1 - data['sellProfit']
-	else:
+	elif optType == OptType.PUT.value:
 		data['otm'] = 1 - scipy.stats.norm(underlyingPrice,sigma).cdf(strikePrice)
 		data['sellProfit'] = scipy.stats.norm(underlyingPrice,sigma).cdf(strikePrice - optionPrice)
 		if data['sellProfit'] == 1 and underlyingPrice < strikePrice:
@@ -160,14 +164,14 @@ def calc_opt_probabilities(underlyingPrice, strikePrice, optionPrice, daysToExpi
 
 def calc_intr_extr_values(underlyingPrice, optionPrice, strikePrice, optType):
 	data = {}
-	if optType == 'call':
+	if optType == OptType.CALL.value:
 		if strikePrice >= underlyingPrice:
 			data['ext'] = optionPrice
 			data['intr'] = 0
 		else:
 			data['intr'] = underlyingPrice - strikePrice
 			data['ext'] = optionPrice - data['intr']
-	else:
+	elif optType == OptType.PUT.value:
 		if strikePrice <= underlyingPrice:
 			data['ext'] = optionPrice
 			data['intr'] = 0
@@ -181,9 +185,7 @@ def run_simulations(dte, iv, initialPrice, strikePrice, optType, isStochasticVol
 	NUM_SIMS = 500
 	stock = yf.Ticker("^VVIX")
 	info = stock.info
-	#volOfVol = info["bid"]*(1/TRADING_DAYS_PER_YEAR)**0.5
-	volOfVol = 88*(1/TRADING_DAYS_PER_YEAR)**0.5
-	iv = 28
+	volOfVol = info["bid"]*(1/TRADING_DAYS_PER_YEAR)**0.5
 	meanFinalIntrVal = 0
 	# run a N trial monte carlo simulation of SPX stock price movements over the specified number of minutes.
 	for i in range(1, NUM_SIMS):
@@ -192,8 +194,6 @@ def run_simulations(dte, iv, initialPrice, strikePrice, optType, isStochasticVol
 		for day in range(0, dte):
 			if isStochasticVol:
 				currentIV = np.random.normal(currentIV, volOfVol, 1)
-				if(i == 1):
-					print(currentIV)
 				if currentIV <= 0:
 					currentIV = 0
 
@@ -203,10 +203,10 @@ def run_simulations(dte, iv, initialPrice, strikePrice, optType, isStochasticVol
 			normalMean = math.log(currentPrice) - normalStd**2 / 2
 			currentPrice = np.random.lognormal(normalMean, normalStd)
 
-		if(optType == "call" and currentPrice > strikePrice):
+		if(optType == OptType.CALL.value and currentPrice > strikePrice):
 			finalIntrVal = currentPrice - strikePrice
 			meanFinalIntrVal = meanFinalIntrVal + finalIntrVal
-		elif(optType == "put" and currentPrice < strikePrice):
+		elif(optType == OptType.PUT.value and currentPrice < strikePrice):
 			finalIntrVal = strikePrice - currentPrice
 			meanFinalIntrVal = meanFinalIntrVal + finalIntrVal
 	return meanFinalIntrVal / NUM_SIMS
@@ -221,17 +221,14 @@ def train_garch_1_1(stockHistoricalData):
 	return model.fit()
 
 def train_arch(stockHistoricalData):
-	# seed pseudorandom number generator
 	seed(1)
-	# train over prior years' data
+	# train over prior year's data
 	trainingData = stockHistoricalData["Close"].head(n=TRADING_DAYS_PER_YEAR)
 	model = arch_model(trainingData, vol='GARCH', p=1)
-	# fit model
 	return model.fit()
 
 def run_g_arch(stockHistoricalData, dte, isGarch):
 	modelFit = train_garch_1_1(stockHistoricalData)
-	# forecast the test set
 	yhat = modelFit.forecast(horizon=dte, reindex=False)
 	underlyingPrice = get_underlying(stockHistoricalData)
 	hIndx = 'h.' + str(dte)
@@ -253,9 +250,9 @@ def calc_g_arch_val(ticker, optType, isGarch):
 	garchVol = (garchVariance**0.5)/underlyingPrice*100
 	annualizedGarchVol = garchVol*(TRADING_DAYS_PER_YEAR/dte)**0.5
 	data['forecastedVol'] = annualizedGarchVol
-	if(optType == "put"):
+	if(optType == OptType.PUT.value):
 		data['forecastedPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=annualizedGarchVol).putPrice
-	elif(optType == 'call'):
+	elif(optType == OptType.CALL.value):
 		data['forecastedPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=annualizedGarchVol).callPrice
 
 
@@ -284,7 +281,7 @@ def calc_option_details(ticker, optType):
 	interestRate = float(request.args.get('riskFreeRate'))
 	dte = int(request.args.get('dte'))
 	optionPrice = float(request.args.get('optionPrice'))
-	data = calc_greeks(underlyingPrice, strikePrice, interestRate, dte, optionPrice, optType == 'call')
+	data = calc_greeks(underlyingPrice, strikePrice, interestRate, dte, optionPrice, optType == OptType.CALL.value)
 	data['expMoves'] = calc_exp_moves(underlyingPrice, data['iv'], dte)
 	data['probabilities'] = calc_opt_probabilities(underlyingPrice, strikePrice, optionPrice, dte, data['iv'], optType)
 	data['intrExtrVals'] = calc_intr_extr_values(underlyingPrice, optionPrice, strikePrice, optType)
@@ -295,14 +292,14 @@ def calc_option_details(ticker, optType):
 	data['60dHv'] = calc_hv(historicData, 60)
 	data['100dHv'] = calc_hv(historicData, 100)
 
-	if optType == 'call':
+	if optType == OptType.CALL.value:
 		data['10dHvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['10dHv']).callPrice
 		data['30dHvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['30dHv']).callPrice
 		data['45dHvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['45dHv']).callPrice
 		data['60dHvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['60dHv']).callPrice
 		data['100dHvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['100dHv']).callPrice
 
-	else:
+	elif optType == OptType.PUT.value:
 		data['10dHvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['10dHv']).putPrice
 		data['30dHvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['30dHv']).putPrice
 		data['45dHvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['45dHv']).putPrice
@@ -328,10 +325,10 @@ def calc_black_scholes_vrp(ticker, optType):
 
 	data['hv'] = calc_hv(historicData, dte)
 
-	if optType == 'call':
+	if optType == OptType.CALL.value:
 		data['hvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['hv']).callPrice
 
-	else:
+	elif optType == OptType.PUT.value:
 		data['hvPrice'] = mibian.BS([underlyingPrice, strikePrice, interestRate, dte], volatility=data['hv']).putPrice
 
 	data['volRiskPremium'] = optionPrice - data['hvPrice']
@@ -351,7 +348,8 @@ def calc_monte_carlo_value(ticker, optType):
 
 	expDate = calc_30dte_date(stock)
 	iv = get_30d_atm_iv(stock, expDate, underlyingPrice)
-
+	print("IV")
+	print(iv)
 	data = {}
 	data["dynamicVolValue"] = run_simulations(dte, iv, underlyingPrice, strikePrice, optType, True)
 	data["staticVolValue"] = run_simulations(dte, iv, underlyingPrice, strikePrice, optType, False)
@@ -375,9 +373,9 @@ def calc_opt_changes(ticker, optType):
 	if dte < 1:
 		dte = 1
 	data = {}
-	if optType == "call":
+	if optType == OptType.CALL.value:
 		data['newPrice'] = mibian.BS([newUndlngPrice, strikePrice, interestRate, dte], volatility=newVol).callPrice
-	else:
+	elif optType == OptType.PUT.value:
 		data['newPrice'] = mibian.BS([newUndlngPrice, strikePrice, interestRate, dte], volatility=newVol).putPrice
 
 	jsonData = json.dumps(data)
@@ -445,7 +443,7 @@ def calc_opt_iv(optType):
 	interestRate = float(request.args.get('interestRate'))
 	daysToExpiration = float(request.args.get('daysToExpiration'))
 	optionPrice = float(request.args.get('optionPrice'))
-	return str(calc_iv(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, optType == 'call'))
+	return str(calc_iv(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, optType == OptType.CALL.value))
 
 @application.route('/greeks/<optType>')
 def calc_opt_greeks(optType):
@@ -455,7 +453,7 @@ def calc_opt_greeks(optType):
 	interestRate = float(request.args.get('interestRate'))
 	daysToExpiration = float(request.args.get('daysToExpiration'))
 	optionPrice = float(request.args.get('optionPrice'))
-	data = calc_greeks(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, optType == 'call')
+	data = calc_greeks(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, optType == OptType.CALL.value)
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
@@ -467,7 +465,7 @@ def calc_prob_otm(optType):
 	interestRate = float(request.args.get('interestRate'))
 	daysToExpiration = float(request.args.get('daysToExpiration'))
 	optionPrice = float(request.args.get('optionPrice'))
-	iv = calc_iv(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, optType == 'call')
+	iv = calc_iv(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, optType == OptType.CALL.value)
 	data = calc_opt_probabilities(underlyingPrice, strikePrice, optionPrice, daysToExpiration, iv, optType)
 	jsonData = json.dumps(data)
 	return str(jsonData)
