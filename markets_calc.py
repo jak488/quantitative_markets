@@ -17,6 +17,7 @@ from arch import arch_model
 from enum import Enum
 
 TRADING_DAYS_PER_YEAR = 250
+
 class OptType(Enum):
     CALL = "call"
     PUT = "put"
@@ -185,7 +186,8 @@ def run_simulations(dte, iv, initialPrice, strikePrice, optType, isStochasticVol
 	NUM_SIMS = 500
 	stock = yf.Ticker("^VVIX")
 	info = stock.info
-	volOfVol = info["bid"]*(1/TRADING_DAYS_PER_YEAR)**0.5
+	#volOfVol = info["bid"]*(1/TRADING_DAYS_PER_YEAR)**0.5
+	volOfVol = 88*(1/TRADING_DAYS_PER_YEAR)**0.5
 	meanFinalIntrVal = 0
 	# run a N trial monte carlo simulation of SPX stock price movements over the specified number of minutes.
 	for i in range(1, NUM_SIMS):
@@ -212,19 +214,15 @@ def run_simulations(dte, iv, initialPrice, strikePrice, optType, isStochasticVol
 	return meanFinalIntrVal / NUM_SIMS
 
 def train_garch_1_1(stockHistoricalData):
-	# seed pseudorandom number generator
-	seed(1)
 	# train over prior years' data
 	trainingData = stockHistoricalData["Close"].head(n=TRADING_DAYS_PER_YEAR)
 	model = arch_model(trainingData, vol='GARCH', p=1, q=1)
-	# fit model
 	return model.fit()
 
 def train_arch(stockHistoricalData):
-	seed(1)
 	# train over prior year's data
 	trainingData = stockHistoricalData["Close"].head(n=TRADING_DAYS_PER_YEAR)
-	model = arch_model(trainingData, vol='GARCH', p=1)
+	model = arch_model(trainingData, vol='ARCH', p=1)
 	return model.fit()
 
 def run_g_arch(stockHistoricalData, dte, isGarch):
