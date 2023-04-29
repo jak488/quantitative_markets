@@ -43,6 +43,19 @@ def calc_greeks(underlyingPrice, strikePrice, interestRate, daysToExpiration, op
 		data['rho'] = c.callRho
 		data['vega'] = c.vega
 		data['gamma'] = c.gamma
+		# analytically estimate vomma, the derivative of vega with respect to iv
+		newIv = 1.01*iv
+		newCall = mibian.BS([underlyingPrice, strikePrice, interestRate, daysToExpiration], volatility=newIv)
+		vomma = (newCall.vega - c.vega)/(newIv - iv)
+		data['vomma'] = vomma
+		# now do vanna, the derivative of delta with respect to iv
+		vanna = (newCall.callDelta - c.callDelta)/(newIv - iv)
+		data['vanna'] = vanna
+		# now do charm, the derivative of delta with respect to time
+		newDte = 1.01*daysToExpiration
+		newDteCall = mibian.BS([underlyingPrice, strikePrice, interestRate, newDte], volatility=iv)
+		charm = (newDteCall.vega - c.vega)/(newDte - daysToExpiration)
+		data['charm'] = charm
 		return data
 	else:
 		iv = calc_iv(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, False)
@@ -54,6 +67,19 @@ def calc_greeks(underlyingPrice, strikePrice, interestRate, daysToExpiration, op
 		data['rho'] = p.putRho
 		data['vega'] = p.vega
 		data['gamma'] = p.gamma
+		# analytically estimate vomma, the derivative of vega with respect to iv
+		newIv = 1.01*iv
+		newPut = mibian.BS([underlyingPrice, strikePrice, interestRate, daysToExpiration], volatility=newIv)
+		vomma = (newPut.vega - p.vega)/(newIv - iv)
+		data['vomma'] = vomma
+		# now do vanna, the derivative of delta with respect to iv
+		vanna = (newPut.putDelta - p.putDelta)/(newIv - iv)
+		data['vanna'] = vanna
+		# now do charm, the derivative of delta with respect to time
+		newDte = 1.01*daysToExpiration
+		newDtePut = mibian.BS([underlyingPrice, strikePrice, interestRate, newDte], volatility=iv)
+		charm = (newDtePut.vega - p.vega)/(newDte - daysToExpiration)
+		data['charm'] = charm
 		return data
 
 def calc_hv(historicData, days):
@@ -496,7 +522,6 @@ def get_recent_correlation(ticker, corrTicker):
 	tickers = yf.download(ticker + " " + corrTicker, period = pastDays, interval = "1d", group_by = 'ticker')
 	df_pivot = tickers.loc[:, (slice(None), 'Close')].apply(pd.to_numeric)
 	corr_df = df_pivot.corr(method='pearson')
-	print(tickers)
 	return str(corr_df.iloc[1][0])
 
 @application.route('/correlation/period/<ticker>/<corrTicker>')
@@ -506,8 +531,35 @@ def get_period_correlation(ticker, corrTicker):
 	tickers = yf.download(ticker + " " + corrTicker, start=startDate, end=endDate, interval = "1d", group_by = 'ticker')
 	df_pivot = tickers.loc[:, (slice(None), 'Close')].apply(pd.to_numeric)
 	corr_df = df_pivot.corr(method='pearson')
-	print(tickers)
 	return str(corr_df.iloc[1][0])
+
+@application.route('/correlation/monthly/<ticker>/<corrTicker>')
+def get_monthly_correlations(ticker, corrTicker):
+	startDate = request.args.get('startDate')
+	endDate = request.args.get('endDate')
+	tickers = yf.download(ticker + " " + corrTicker, start=startDate, end=endDate, interval = "1d", group_by = 'ticker')
+	df_pivot = tickers.loc[:, (slice(None), 'Close')].apply(pd.to_numeric)
+	groups = df_pivot.groupby(pd.Grouper(level='Date', freq='M'))
+	data = {}
+	for name, group in groups:
+		group_corr_df = group.corr(method='pearson')
+		data[str(name.month) + "/" + str(name.year)] = group_corr_df.iloc[1][0]
+	jsonData = json.dumps(data)
+	return jsonData
+
+@application.route('/correlation/yearly/<ticker>/<corrTicker>')
+def get_yearly_correlations(ticker, corrTicker):
+	startDate = request.args.get('startDate')
+	endDate = request.args.get('endDate')
+	tickers = yf.download(ticker + " " + corrTicker, start=startDate, end=endDate, interval = "1d", group_by = 'ticker')
+	df_pivot = tickers.loc[:, (slice(None), 'Close')].apply(pd.to_numeric)
+	groups = df_pivot.groupby(pd.Grouper(level='Date', freq='Y'))
+	data = {}
+	for name, group in groups:
+		group_corr_df = group.corr(method='pearson')
+		data[str(name.year)] = group_corr_df.iloc[1][0]
+	jsonData = json.dumps(data)
+	return jsonData
 
 # run the app.
 if __name__ == "__main__":
