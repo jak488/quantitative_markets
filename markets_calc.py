@@ -535,29 +535,42 @@ def get_period_correlation(ticker, corrTicker):
 
 @application.route('/correlation/monthly/<ticker>/<corrTicker>')
 def get_monthly_correlations(ticker, corrTicker):
-	startDate = request.args.get('startDate')
-	endDate = request.args.get('endDate')
-	tickers = yf.download(ticker + " " + corrTicker, start=startDate, end=endDate, interval = "1d", group_by = 'ticker')
-	df_pivot = tickers.loc[:, (slice(None), 'Close')].apply(pd.to_numeric)
-	groups = df_pivot.groupby(pd.Grouper(level='Date', freq='M'))
-	data = {}
-	for name, group in groups:
-		group_corr_df = group.corr(method='pearson')
-		data[str(name.month) + "/" + str(name.year)] = group_corr_df.iloc[1][0]
-	jsonData = json.dumps(data)
-	return jsonData
+	return get_correlations_by_period(ticker, corrTicker, True)
 
 @application.route('/correlation/yearly/<ticker>/<corrTicker>')
 def get_yearly_correlations(ticker, corrTicker):
+	return get_correlations_by_period(ticker, corrTicker, False)
+
+def get_correlations_by_period(ticker, corrTicker, isMonthly):
 	startDate = request.args.get('startDate')
 	endDate = request.args.get('endDate')
 	tickers = yf.download(ticker + " " + corrTicker, start=startDate, end=endDate, interval = "1d", group_by = 'ticker')
 	df_pivot = tickers.loc[:, (slice(None), 'Close')].apply(pd.to_numeric)
-	groups = df_pivot.groupby(pd.Grouper(level='Date', freq='Y'))
+	if(isMonthly):
+		groups = df_pivot.groupby(pd.Grouper(level='Date', freq='M'))
+	else:
+		groups = df_pivot.groupby(pd.Grouper(level='Date', freq='Y'))
 	data = {}
+	maxCorr = -1
+	maxCorrPeriod = ""
+	minCorrPeriod = ""
+	minCorr = 1
 	for name, group in groups:
 		group_corr_df = group.corr(method='pearson')
-		data[str(name.year)] = group_corr_df.iloc[1][0]
+		corr = group_corr_df.iloc[1][0]
+		if(isMonthly):
+			period = str(name.month) + "/" + str(name.year)
+		else:
+			period = str(name.year)
+		data[period] = corr
+		if(corr > maxCorr):
+			maxCorr = corr
+			maxCorrPeriod = period
+		if(corr < minCorr):
+			minCorr = corr
+			minCorrPeriod = period
+	data["MAX at " + maxCorrPeriod] = maxCorr
+	data["MIN at " + minCorrPeriod] = minCorr
 	jsonData = json.dumps(data)
 	return jsonData
 
