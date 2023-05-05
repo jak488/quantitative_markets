@@ -16,6 +16,16 @@ from matplotlib import pyplot
 from arch import arch_model
 from enum import Enum
 
+from numpy import arange
+import matplotlib.pyplot as plt
+from pandas import read_csv
+from sklearn import metrics
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import RandomizedSearchCV
+
 TRADING_DAYS_PER_YEAR = 250
 
 class OptType(Enum):
@@ -283,6 +293,88 @@ def calc_g_arch_val(ticker, optType, isGarch):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+
+def get_correlations_by_period(ticker, corrTicker, isMonthly):
+	startDate = request.args.get('startDate')
+	endDate = request.args.get('endDate')
+	tickers = yf.download(ticker + " " + corrTicker, start=startDate, end=endDate, interval = "1d", group_by = 'ticker')
+	df_pivot = tickers.loc[:, (slice(None), 'Close')].apply(pd.to_numeric)
+	if(isMonthly):
+		groups = df_pivot.groupby(pd.Grouper(level='Date', freq='M'))
+	else:
+		groups = df_pivot.groupby(pd.Grouper(level='Date', freq='Y'))
+	data = {}
+	maxCorr = -1
+	maxCorrPeriod = ""
+	minCorrPeriod = ""
+	minCorr = 1
+	for name, group in groups:
+		group_corr_df = group.corr(method='pearson')
+		corr = group_corr_df.iloc[1][0]
+		if(isMonthly):
+			period = str(name.month) + "/" + str(name.year)
+		else:
+			period = str(name.year)
+		data[period] = corr
+		if(corr > maxCorr):
+			maxCorr = corr
+			maxCorrPeriod = period
+		if(corr < minCorr):
+			minCorr = corr
+			minCorrPeriod = period
+	data["MAX"] = {}
+	data["MIN"] = {}
+	data["MAX"][maxCorrPeriod] = maxCorr
+	data["MIN"][minCorrPeriod] = minCorr
+	jsonData = json.dumps(data)
+	return jsonData
+
+
+def spy_classify_month():
+	return spy_classify_period("1mo")
+
+def spy_classify_week():
+	return spy_classify_period("1wk")
+
+def spy_classify_day():
+	return spy_classify_period("1d")
+
+def spy_classify_period(period):
+	sp500_data = yf.download("SPY", start="1920-01-03", end="2023-05-04", interval = period)
+	sp500_df = pd.DataFrame(sp500_data)
+	sp500_df.to_csv("sp500_data.csv")
+	print(sp500_data)
+
+	df = pd.read_csv("sp500_data.csv")
+	df.set_index("Date", inplace=True)
+	df.dropna(inplace=True)
+
+	x = df.iloc[:, 0:5].values
+	x_forecast = df.iloc[-30:, 0:5].values
+	y = df.iloc[:, 4].ge(df.iloc[:, 4].shift(periods=1, fill_value=0)).values
+
+	x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.26,  shuffle=True, random_state=0)
+
+	scale = StandardScaler()
+	x_train = scale.fit_transform(x_train)
+	x_test = scale.transform(x_test)
+	x_forecast = scale.transform(x_forecast)
+
+	# hyperparameters obtained through grid search tuning
+	if(period == "1mo"):
+		model = RandomForestClassifier(n_estimators=50, random_state=42, min_samples_split=2, min_samples_leaf=1, max_depth=6, bootstrap=True)
+	elif(period == "1wk"):
+		model = RandomForestClassifier(n_estimators=50, random_state=2, min_samples_split=2, min_samples_leaf=1, max_depth=14, bootstrap=True)
+	else:
+		model = RandomForestClassifier(n_estimators=500, random_state=2, min_samples_split=2, min_samples_leaf=1, max_depth=14, bootstrap=True)
+	model.fit(x_train, y_train)
+
+	predict = model.predict(x_test)
+
+	print('Accuracy:', str(100*np.equal(y_test, predict).sum()/y_test.size), '%.')
+
+	return model.predict(x_forecast)
+
 application = Flask(__name__)
 cors = CORS(application)
 application.config['CORS_HEADERS'] = 'Content-Type'
@@ -541,38 +633,90 @@ def get_monthly_correlations(ticker, corrTicker):
 def get_yearly_correlations(ticker, corrTicker):
 	return get_correlations_by_period(ticker, corrTicker, False)
 
-def get_correlations_by_period(ticker, corrTicker, isMonthly):
-	startDate = request.args.get('startDate')
-	endDate = request.args.get('endDate')
-	tickers = yf.download(ticker + " " + corrTicker, start=startDate, end=endDate, interval = "1d", group_by = 'ticker')
-	df_pivot = tickers.loc[:, (slice(None), 'Close')].apply(pd.to_numeric)
-	if(isMonthly):
-		groups = df_pivot.groupby(pd.Grouper(level='Date', freq='M'))
-	else:
-		groups = df_pivot.groupby(pd.Grouper(level='Date', freq='Y'))
+
+@application.route('/randomforest/regressor')
+def rf_regress():
+	sp500_data = yf.download("AAPL", start="2017-01-01", end="2021-10-16")
+	sp500_df = pd.DataFrame(sp500_data)
+	sp500_df.to_csv("sp500_data.csv")
+
+	df = pd.read_csv("sp500_data.csv")
+	df.set_index("Date", inplace=True)
+	df.dropna(inplace=True)
+
+	x = df.iloc[:, 0:5].values
+	#y = df.iloc[:, 4].ge(df.iloc[:, 4].shift(periods=1, fill_value=0)).values
+	y = df.iloc[:, 4].shift(periods=1, fill_value=0).values
+	print(y)
+
+	x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.26,  random_state=0)
+
+	scale = StandardScaler()
+	x_train = scale.fit_transform(x_train)
+	x_test = scale.transform(x_test)
+
+# 	grid_rf = {
+# 		'n_estimators': [20, 50, 100, 500, 1000],
+# 		'max_depth': np.arange(1, 15, 1),
+# 		'min_samples_split': [2, 10, 9],
+# 		'min_samples_leaf': np.arange(1, 15, 2, dtype=int),
+# 		'bootstrap': [True, False],
+# 		'random_state': [1, 2, 30, 42]
+# 	}
+
+	model = RandomForestRegressor(n_estimators=500, random_state=42, min_samples_split=2, min_samples_leaf=1, max_depth=10, bootstrap=True)
+	model.fit(x_train, y_train)
+	predict = model.predict(x_test)
+	print("Y_TEST")
+	print(y_test)
+	print("PREDICT:")
+	print(predict)
+
+
+	print("Mean Absolute Error:", round(metrics.mean_absolute_error(y_test, predict), 4))
+	print("Mean Squared Error:", round(metrics.mean_squared_error(y_test, predict), 4))
+	print("Root Mean Squared Error:", round(np.sqrt(metrics.mean_squared_error(y_test, predict)), 4))
+	print("(R^2) Score:", round(metrics.r2_score(y_test, predict), 4))
+	print(f'Train Score : {model.score(x_train, y_train) * 100:.2f}% and Test Score : {model.score(x_test, y_test) * 100:.2f}% using Random Tree Regressor.')
+	errors = abs(predict - y_test)
+	mape = 100 * (errors / y_test)
+	accuracy = 100 - np.mean(mape)
+	print('Accuracy:', round(accuracy, 2), '%.')
+	return {}
+
+
+@application.route('/randomforest/classifier')
+def rf_classify():
+	predict_month_result = spy_classify_month()
 	data = {}
-	maxCorr = -1
-	maxCorrPeriod = ""
-	minCorrPeriod = ""
-	minCorr = 1
-	for name, group in groups:
-		group_corr_df = group.corr(method='pearson')
-		corr = group_corr_df.iloc[1][0]
-		if(isMonthly):
-			period = str(name.month) + "/" + str(name.year)
-		else:
-			period = str(name.year)
-		data[period] = corr
-		if(corr > maxCorr):
-			maxCorr = corr
-			maxCorrPeriod = period
-		if(corr < minCorr):
-			minCorr = corr
-			minCorrPeriod = period
-	data["MAX at " + maxCorrPeriod] = maxCorr
-	data["MIN at " + minCorrPeriod] = minCorr
+	if(predict_month_result[0]):
+		data["Next Month Forecast:"] = "UP"
+	else:
+		data["Next Month Forecast:"] = "DOWN"
+
+
+	predict_week_result = spy_classify_week()
+	if(predict_week_result[0]):
+		data["Next Week Forecast:"] = "UP"
+	else:
+		data["Next Week Forecast:"] = "DOWN"
+
+	predict_day_result = spy_classify_day()
+	if(predict_day_result[0]):
+		data["Next Day Forecast:"] = "UP"
+	else:
+		data["Next Day Forecast:"] = "DOWN"
+
 	jsonData = json.dumps(data)
-	return jsonData
+	return str(jsonData)
+
+@application.route('/vwap/<ticker>')
+def calc_todays_vwap(ticker):
+	df = yf.download(ticker, interval="5m", period="1d")
+	v = df['Volume'].values
+	tp = (df['Low'] + df['Close'] + df['High']).div(3).values
+	df = df.assign(vwap=(tp * v).cumsum() / v.cumsum())
+	return str(df['vwap'].to_json(orient = "index"))
 
 # run the app.
 if __name__ == "__main__":
