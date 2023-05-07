@@ -1,7 +1,6 @@
 from flask import Flask, request
-from flask_cors import CORS, cross_origin
+from flask_cors import CORS
 import pandas as pd
-import sys
 import yfinance as yf
 import math
 import mibian
@@ -10,21 +9,13 @@ import json
 from datetime import datetime, timedelta
 import numpy as np
 import random
-from random import gauss
-from random import seed
-from matplotlib import pyplot
 from arch import arch_model
 from enum import Enum
-
-from numpy import arange
-import matplotlib.pyplot as plt
 from pandas import read_csv
 from sklearn import metrics
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import RandomizedSearchCV
 
 TRADING_DAYS_PER_YEAR = 250
 
