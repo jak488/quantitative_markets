@@ -7,7 +7,7 @@ import math
 import mibian
 import scipy
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 import random
 from random import gauss
@@ -340,7 +340,9 @@ def spy_classify_day():
 	return spy_classify_period("1d")
 
 def spy_classify_period(period):
-	sp500_data = yf.download("SPY", start="1920-01-03", end="2023-05-04", interval = period)
+	yesterday = datetime.now() - timedelta(1)
+	datetime.strftime(yesterday, '%Y-%m-%d')
+	sp500_data = yf.download("SPY", start="1920-01-03", end=yesterday, interval = period)
 	sp500_df = pd.DataFrame(sp500_data)
 	sp500_df.to_csv("sp500_data.csv")
 	print(sp500_data)
@@ -349,8 +351,10 @@ def spy_classify_period(period):
 	df.set_index("Date", inplace=True)
 	df.dropna(inplace=True)
 
-	x = df.iloc[:, 0:5].values
-	x_forecast = df.iloc[-30:, 0:5].values
+	x = df.iloc[:, 0:6].values # holding values for six features: open, high, low, close, adj close, and volume
+	x_forecast = df.iloc[-30:, 0:6].values
+
+	# bool values for whether or not the next day's adj close is higher than the corresponding prior day's
 	y = df.iloc[:, 4].ge(df.iloc[:, 4].shift(periods=1, fill_value=0)).values
 
 	x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.26,  shuffle=True, random_state=0)
@@ -379,14 +383,17 @@ application = Flask(__name__)
 cors = CORS(application)
 application.config['CORS_HEADERS'] = 'Content-Type'
 
+# Uses GARCH model to estimate fair value for a given option
 @application.route('/garch/value/<ticker>/<optType>')
 def calc_garch_val(ticker, optType):
 	return calc_g_arch_val(ticker, optType, True)
 
+# Uses ARCH model to estimate fair value for a given option
 @application.route('/arch/value/<ticker>/<optType>')
 def calc_arch_val(ticker, optType):
 	return calc_g_arch_val(ticker, optType, False)
 
+# Calculates various details, including expected moves, historic volatility, etc for a given option
 @application.route('/details/<ticker>/<optType>')
 def calc_option_details(ticker, optType):
 	is_valid_option_type(optType)
@@ -425,6 +432,7 @@ def calc_option_details(ticker, optType):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+# Calculates the volatility risk premium using historic volatility
 @application.route('/vrp/<ticker>/<optType>')
 def calc_black_scholes_vrp(ticker, optType):
 	is_valid_option_type(optType)
@@ -451,6 +459,7 @@ def calc_black_scholes_vrp(ticker, optType):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+# Calculates option fair values using both stochastic and static volatility monte carlo simulations
 @application.route('/montecarlo/value/<ticker>/<optType>')
 def calc_monte_carlo_value(ticker, optType):
 	is_valid_option_type(optType)
@@ -473,6 +482,7 @@ def calc_monte_carlo_value(ticker, optType):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+# Calcuates new BSM option value given changes in implied vol and/or underlying price moves
 @application.route('/changes/<ticker>/<optType>')
 def calc_opt_changes(ticker, optType):
 	is_valid_option_type(optType)
@@ -497,14 +507,8 @@ def calc_opt_changes(ticker, optType):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
-@application.route('/summary/short/<ticker>')
-def get_short_summary(ticker):
-	stock = yf.Ticker(ticker)
-	data = get_basic_fields(stock)
-	jsonData = json.dumps(data)
-	return str(jsonData)
-
-# Endpoint exists separately from /summary/short since it requires an additional call to yfinance api
+# Retrieves extensive list of various statistics on a given security.
+# Endpoint exists separately from /summary/short as this endpoint requires an additional roundtrip to yfinance api
 @application.route('/summary/long/<ticker>')
 def get_long_summary(ticker):
 	stock = yf.Ticker(ticker)
@@ -530,6 +534,15 @@ def get_long_summary(ticker):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+
+# Retrieves abbreviated list of various statistics on a given security.
+@application.route('/summary/short/<ticker>')
+def get_short_summary(ticker):
+	stock = yf.Ticker(ticker)
+	data = get_basic_fields(stock)
+	jsonData = json.dumps(data)
+	return str(jsonData)
+
 @application.route('/hv/<ticker>')
 def calc_historic_vol(ticker):
 	stock = yf.Ticker(ticker)
@@ -551,6 +564,7 @@ def get_options_chain(ticker):
 	jsonData = json.dumps(parsedJson)
 	return jsonData
 
+# Calculates BSM implied volatility given parameters.
 @application.route('/iv/<optType>')
 def calc_opt_iv(optType):
 	is_valid_option_type(optType)
@@ -561,6 +575,7 @@ def calc_opt_iv(optType):
 	optionPrice = float(request.args.get('optionPrice'))
 	return str(calc_iv(underlyingPrice, strikePrice, interestRate, daysToExpiration, optionPrice, optType == OptType.CALL.value))
 
+# Calculations BSM option greeks, including estimations of various second order greeks.
 @application.route('/greeks/<optType>')
 def calc_opt_greeks(optType):
 	is_valid_option_type(optType)
@@ -573,6 +588,7 @@ def calc_opt_greeks(optType):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+# Calculates BSM probability that option expires out of the money.
 @application.route('/prob_otm/<optType>')
 def calc_prob_otm(optType):
 	is_valid_option_type(optType)
@@ -586,6 +602,7 @@ def calc_prob_otm(optType):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+# Calculates option's intrinsic and extrinsic values.
 @application.route('/extrinsic_val/<optType>')
 def calc_extrinsic_value(optType):
 	is_valid_option_type(optType)
@@ -596,6 +613,7 @@ def calc_extrinsic_value(optType):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+# Calculates expected moves of a given security using at the money BSM volatility.
 @application.route('/moves/<ticker>')
 def get_expected_moves_for_ticker(ticker):
 	daysToExpiration = request.args.get('dte')
@@ -608,6 +626,7 @@ def get_expected_moves_for_ticker(ticker):
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+# Calculates correlation between two securities over the last N days.
 @application.route('/correlation/recent/<ticker>/<corrTicker>')
 def get_recent_correlation(ticker, corrTicker):
 	pastDays = request.args.get('pastDays') + "d"
@@ -616,6 +635,7 @@ def get_recent_correlation(ticker, corrTicker):
 	corr_df = df_pivot.corr(method='pearson')
 	return str(corr_df.iloc[1][0])
 
+# Calculates correlation between two securities between two dates.
 @application.route('/correlation/period/<ticker>/<corrTicker>')
 def get_period_correlation(ticker, corrTicker):
 	startDate = request.args.get('startDate')
@@ -625,66 +645,18 @@ def get_period_correlation(ticker, corrTicker):
 	corr_df = df_pivot.corr(method='pearson')
 	return str(corr_df.iloc[1][0])
 
+# Calculates monthly correlations, including Max and Min correlations, between two securies.
 @application.route('/correlation/monthly/<ticker>/<corrTicker>')
 def get_monthly_correlations(ticker, corrTicker):
 	return get_correlations_by_period(ticker, corrTicker, True)
 
+# Calculates yearly correlations, including Max and Min correlations, between two securies.
 @application.route('/correlation/yearly/<ticker>/<corrTicker>')
 def get_yearly_correlations(ticker, corrTicker):
 	return get_correlations_by_period(ticker, corrTicker, False)
 
-
-@application.route('/randomforest/regressor')
-def rf_regress():
-	sp500_data = yf.download("AAPL", start="2017-01-01", end="2021-10-16")
-	sp500_df = pd.DataFrame(sp500_data)
-	sp500_df.to_csv("sp500_data.csv")
-
-	df = pd.read_csv("sp500_data.csv")
-	df.set_index("Date", inplace=True)
-	df.dropna(inplace=True)
-
-	x = df.iloc[:, 0:5].values
-	#y = df.iloc[:, 4].ge(df.iloc[:, 4].shift(periods=1, fill_value=0)).values
-	y = df.iloc[:, 4].shift(periods=1, fill_value=0).values
-	print(y)
-
-	x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.26,  random_state=0)
-
-	scale = StandardScaler()
-	x_train = scale.fit_transform(x_train)
-	x_test = scale.transform(x_test)
-
-# 	grid_rf = {
-# 		'n_estimators': [20, 50, 100, 500, 1000],
-# 		'max_depth': np.arange(1, 15, 1),
-# 		'min_samples_split': [2, 10, 9],
-# 		'min_samples_leaf': np.arange(1, 15, 2, dtype=int),
-# 		'bootstrap': [True, False],
-# 		'random_state': [1, 2, 30, 42]
-# 	}
-
-	model = RandomForestRegressor(n_estimators=500, random_state=42, min_samples_split=2, min_samples_leaf=1, max_depth=10, bootstrap=True)
-	model.fit(x_train, y_train)
-	predict = model.predict(x_test)
-	print("Y_TEST")
-	print(y_test)
-	print("PREDICT:")
-	print(predict)
-
-
-	print("Mean Absolute Error:", round(metrics.mean_absolute_error(y_test, predict), 4))
-	print("Mean Squared Error:", round(metrics.mean_squared_error(y_test, predict), 4))
-	print("Root Mean Squared Error:", round(np.sqrt(metrics.mean_squared_error(y_test, predict)), 4))
-	print("(R^2) Score:", round(metrics.r2_score(y_test, predict), 4))
-	print(f'Train Score : {model.score(x_train, y_train) * 100:.2f}% and Test Score : {model.score(x_test, y_test) * 100:.2f}% using Random Tree Regressor.')
-	errors = abs(predict - y_test)
-	mape = 100 * (errors / y_test)
-	accuracy = 100 - np.mean(mape)
-	print('Accuracy:', round(accuracy, 2), '%.')
-	return {}
-
-
+# Predicts S&P 500 direction over various timeframes using a random forest classifier trained on volume/price action data.
+# Take this model with a grain of salt....
 @application.route('/randomforest/classifier')
 def rf_classify():
 	predict_month_result = spy_classify_month()
@@ -710,6 +682,7 @@ def rf_classify():
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
+# Calculates daily VWAP.
 @application.route('/vwap/<ticker>')
 def calc_todays_vwap(ticker):
 	df = yf.download(ticker, interval="5m", period="1d")
