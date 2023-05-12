@@ -673,7 +673,7 @@ def rf_classify():
 	jsonData = json.dumps(data)
 	return str(jsonData)
 
-# Calculates daily VWAP.
+# Calculates VWAP for current trading day.
 @application.route('/vwap/<ticker>')
 def calc_todays_vwap(ticker):
 	df = yf.download(ticker, interval="5m", period="1d")
