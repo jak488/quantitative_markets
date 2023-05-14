@@ -19,6 +19,10 @@ from sklearn.preprocessing import StandardScaler
 
 TRADING_DAYS_PER_YEAR = 250
 
+BULLISH = "BULLISH"
+
+BEARISH = "BEARISH"
+
 class OptType(Enum):
     CALL = "call"
     PUT = "put"
@@ -653,22 +657,22 @@ def rf_classify():
 	predict_month_result = spy_classify_month()
 	data = {}
 	if(predict_month_result[0]):
-		data["Next Month Forecast:"] = "UP"
+		data["Next Month Forecast:"] = BULLISH
 	else:
-		data["Next Month Forecast:"] = "DOWN"
+		data["Next Month Forecast:"] = BEARISH
 
 
 	predict_week_result = spy_classify_week()
 	if(predict_week_result[0]):
-		data["Next Week Forecast:"] = "UP"
+		data["Next Week Forecast:"] = BULLISH
 	else:
-		data["Next Week Forecast:"] = "DOWN"
+		data["Next Week Forecast:"] = BEARISH
 
 	predict_day_result = spy_classify_day()
 	if(predict_day_result[0]):
-		data["Next Day Forecast:"] = "UP"
+		data["Next Day Forecast:"] = BULLISH
 	else:
-		data["Next Day Forecast:"] = "DOWN"
+		data["Next Day Forecast:"] = BEARISH
 
 	jsonData = json.dumps(data)
 	return str(jsonData)
